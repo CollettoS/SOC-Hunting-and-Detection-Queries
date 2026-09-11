@@ -1,0 +1,4 @@
+OfficeActivity
+| search "user"
+| search "files"
+| where Operation in ("FileShared","SecureLinkCreated", "SharingLinkUpdated","SharingSet","AddedToSharingLink","SharingSet") 
