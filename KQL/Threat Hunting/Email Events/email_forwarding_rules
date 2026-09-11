@@ -1,0 +1,4 @@
+OfficeActivity
+| search "username"
+| where RecordType == "ExchangeAdmin"
+| where Operation == "Set-InboxRule" or Operation == "New-InboxRule"

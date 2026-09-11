@@ -1,0 +1,5 @@
+| summarize UniqueIPs = make_list(ClientIP_s)| 
+
+| summarize NetworkMessageIds = make_set(NetworkMessageId)
+
+| project NetworkMessageIds = strcat_array(NetworkMessageIds, "\n"

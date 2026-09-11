@@ -1,0 +1,65 @@
+let SuspiciousFiles = dynamic(["spinstall0.aspx", "xxx.aspx"]);
+let SuspiciousProcesses = dynamic(["powershell.exe", "w3wp.exe", "cmd.exe", "cscript.exe"]);
+let SuspiciousCommands = dynamic(["Invoke-WebRequest", "Invoke-Expression", "IEX", "DownloadString", "FromBase64String"]);
+let SuspiciousExtensionsPattern = @".*\.aspx$|.*\.ps1$|.*\.ashx$|.*\.cmd$";
+let SuspiciousFolders = dynamic(["\\inetpub\\wwwroot", "\\Program Files\\Microsoft Shared\\Web Server Extensions"]);
+let FileEvents = DeviceFileEvents
+| where FileName has_any(SuspiciousFiles)
+    or FolderPath has_any(SuspiciousFolders)
+    or FileName matches regex SuspiciousExtensionsPattern
+| extend TriggerReason = case(
+    FileName has_any(SuspiciousFiles), "Suspicious filename",
+    FolderPath has_any(SuspiciousFolders), "Suspicious folder path",
+    FileName matches regex SuspiciousExtensionsPattern, "Suspicious extension",
+    "Unknown"
+)
+| extend SourceTable = "DeviceFileEvents"
+| project TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessAccountName, InitiatingProcessCommandLine, ReportId, TriggerReason, SourceTable;
+let ProcessEvents = DeviceProcessEvents
+| where InitiatingProcessFileName in~ (SuspiciousProcesses)
+    or ProcessCommandLine has_any(SuspiciousCommands)
+    or FolderPath has_any(SuspiciousFolders)
+| extend TriggerReason = case(
+    InitiatingProcessFileName in~ (SuspiciousProcesses), "Initiating Process File Name match (Most likely a FP)",
+    ProcessCommandLine has_any(SuspiciousCommands), "Suspicious command line",
+    FolderPath has_any(SuspiciousFolders), "Process from suspicious folder",
+    "Unknown"
+)
+| extend SourceTable = "DeviceProcessEvents"
+| project TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessAccountName, ProcessCommandLine, ReportId, TriggerReason, SourceTable;
+let NetworkEvents = DeviceNetworkEvents
+| where InitiatingProcessFileName =~ "w3wp.exe"
+    or InitiatingProcessCommandLine has_any(SuspiciousCommands)
+| where RemoteUrl != "" or RemoteIPType == "Public"
+| extend TriggerReason = case(
+    InitiatingProcessFileName =~ "w3wp.exe", "Network call from w3wp.exe",
+    InitiatingProcessCommandLine has_any(SuspiciousCommands), "Suspicious command in network event",
+    "Unknown"
+)
+| extend SourceTable = "DeviceNetworkEvents"
+| project TimeGenerated, DeviceName, RemoteUrl, RemoteIP, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName, ReportId, TriggerReason, SourceTable;
+let RegistryEvents = DeviceRegistryEvents
+| where RegistryKey has_any("Software\\Microsoft\\Windows\\CurrentVersion\\Run", "SYSTEM\\CurrentControlSet\\Services")
+    and RegistryValueData has_any(SuspiciousCommands)
+| extend TriggerReason = "Suspicious autorun persistence via registry"
+| extend SourceTable = "DeviceRegistryEvents"
+| project TimeGenerated, DeviceName, RegistryKey, RegistryValueName, RegistryValueData, InitiatingProcessAccountName, ReportId, TriggerReason, SourceTable;
+let ImageLoadEvents = DeviceImageLoadEvents
+| where InitiatingProcessFileName =~ "w3wp.exe"
+    or InitiatingProcessCommandLine has_any(SuspiciousCommands)
+| extend TriggerReason = case(
+    InitiatingProcessFileName =~ "w3wp.exe", "Image loaded by w3wp.exe",
+    InitiatingProcessCommandLine has_any(SuspiciousCommands), "Suspicious command in image load",
+    "Unknown"
+)
+| extend SourceTable = "DeviceImageLoadEvents"
+| project TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessAccountName, InitiatingProcessCommandLine, ReportId, TriggerReason, SourceTable;
+let WebConfigEvents = DeviceFileEvents
+| where FileName has "web.config"
+    and FolderPath has_any(SuspiciousFolders)
+| extend TriggerReason = "Unexpected web.config in SharePoint/IIS directory"
+| extend SourceTable = "DeviceFileEvents"
+| project TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessAccountName, ReportId, TriggerReason, SourceTable;
+union FileEvents, ProcessEvents, NetworkEvents, RegistryEvents, ImageLoadEvents, WebConfigEvents
+| summarize EventCount = count() by DeviceName, bin(TimeGenerated, 1h), ReportId, TriggerReason, SourceTable
+| sort by TimeGenerated desc

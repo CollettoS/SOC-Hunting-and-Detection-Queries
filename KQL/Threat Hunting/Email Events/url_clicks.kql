@@ -1,0 +1,10 @@
+let url = "";
+let selectedTimestamp = ago(7d);
+search in (EmailUrlInfo,UrlClickEvents,DeviceNetworkEvents,DeviceFileEvents,DeviceEvents)
+Timestamp >= selectedTimestamp
+and (RemoteUrl has url
+or FileOriginUrl has url
+or FileOriginReferrerUrl has url
+or Url has url
+)
+| take 100

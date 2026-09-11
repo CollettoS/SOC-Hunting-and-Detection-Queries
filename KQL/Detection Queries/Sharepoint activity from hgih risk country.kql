@@ -1,0 +1,105 @@
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// Detecton to alert on Sharepoint operations from High Risk countires0
+// Will detect from predefined list of countries deemed as high risk and user agent
+// logic will ignore web crawler
+// Alerting can be tweeked and tuned below in settings and tuning sections
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// Settings
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+let time_range = 7d; // set the lookback time (standard format) 
+let Trigger_on_managed_devices = false; // Set to false to not trigger alerts on managed devices
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// Tuning
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+let HighRiskCountries = dynamic(["China", "Russia", "Iran", "Nigeria", "Niger", "North Korea", "Cuba", "Venezuela", "Syria"]); // Add Counrtires to detect
+let SuspiciousUserAgentKeywords = dynamic([
+    "curl", "wget", "python", "python-requests", "scrapy", "httpclient", "libwww",
+    "nmap", "masscan", "powershell", "java", "winhttp", "Go-http-client",
+    "apache-httpclient", "axios", "bot", "crawler", "spider", "scanner",
+    "feedfetcher", "slurp", "http_request2", "http_get", "mechanize",
+    "php", "perl", "ruby", "fetch", "node-fetch", "urllib", "httpunit", "sdk", "api"
+]);
+let KnownCrawlerUserAgents = dynamic([
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+    "Mozilla/5.0 (compatible; Yahoo! Slurp; http://help.yahoo.com/help/us/ysearch/slurp)",
+    "DuckDuckBot/1.0; (+http://duckduckgo.com/duckduckbot.html)",
+    "Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)",
+    "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+    "Sogou web spider/4.0 (+http://www.sogou.com/docs/help/webmasters.htm#07)"
+]);
+let RiskySharePointOperations = dynamic([
+    "FileDownloaded",
+    "FileSyncDownloadedFull",
+    "FileSyncDownloadedPartial",
+    "SharedLinkCreated",
+    "AnonymousLinkCreated",
+    "AnonymousLinkUpdated",
+    "CompanyLinkCreated",
+    "SecureLinkCreated",
+    "SecureLinkUpdated",
+    "SharingSet"
+]);
+OfficeActivity
+| where TimeGenerated > ago(time_range)
+| where RecordType contains ("SharePoint")
+| extend ClientIP = tostring(ClientIP)
+| where isnotempty(ClientIP) and ClientIP != "0.0.0.0"
+| extend GeoIPInfo = geo_info_from_ip_address(ClientIP)
+| extend country = tostring(parse_json(GeoIPInfo).country),
+         city = tostring(parse_json(GeoIPInfo).city),
+         latitude = tostring(parse_json(GeoIPInfo).latitude),
+         longitude = tostring(parse_json(GeoIPInfo).longitude)
+| extend IsHighRiskCountry = country in~ (HighRiskCountries),
+         IsAnonymousOp = UserId has "Anonymous"
+// Crawler Logic
+| extend isSuspiciousUserAgent = UserAgent has_any ( SuspiciousUserAgentKeywords ) and UserId != "app@sharepoint", // SA 
+         isKnownCrawler = UserAgent in~ ( KnownCrawlerUserAgents ),
+         isRiskyOperation = Operation in~ ( RiskySharePointOperations )
+// 
+| where IsHighRiskCountry or isKnownCrawler or isSuspiciousUserAgent
+| extend AlertTitle = case(
+    IsHighRiskCountry and isKnownCrawler, "Web Crawler Activity from high-risk country",
+    IsHighRiskCountry and isSuspiciousUserAgent and IsAnonymousOp, "Anonymous SharePoint access with Suspicious UserAgent from high-risk country",
+    IsHighRiskCountry and isSuspiciousUserAgent, "SharePoint access with Suspicious UserAgent from high-risk country",
+    IsHighRiskCountry and IsAnonymousOp, "Anonymous SharePoint access from high-risk country",
+    IsHighRiskCountry, "SharePoint access from high-risk country",
+    isSuspiciousUserAgent, "Sharepoint Activity from Suspicious UserAgent",
+    isKnownCrawler, "Web Crawler activity detected in Sharepoint",
+    IsAnonymousOp, "Anonymous or public SharePoint sharing activity",
+    "Suspicious SharePoint Activity"
+)
+| extend AlertTitle = strcat(iif(isRiskyOperation, strcat("High Risk Operation - ", Operation, " - ", AlertTitle), AlertTitle))
+| extend Severity = case(
+    isRiskyOperation and IsHighRiskCountry, "Critical",
+    isRiskyOperation, "high",
+    IsHighRiskCountry and isKnownCrawler, "Medium",
+    IsHighRiskCountry and isSuspiciousUserAgent and IsAnonymousOp, "High",
+    IsHighRiskCountry and isSuspiciousUserAgent, "High",
+    IsHighRiskCountry and IsAnonymousOp, "Medium",
+    IsHighRiskCountry, "Medium",
+    isSuspiciousUserAgent, "Medium",
+    isKnownCrawler, "Low",
+    IsAnonymousOp, "Medium",
+    "Informational"
+)
+| extend Description = strcat("Suspicious SharePoint or OneDrive activity detected. Operation: ", Operation, 
+                              ", Country: ", country, 
+                                iff(IsAnonymousOp, ", Anonymous sharing involved.", "."),
+                                iff(isKnownCrawler, strcat(" Known Crawler Useragent: ", UserAgent ), ""),
+                                iff(isSuspiciousUserAgent, strcat(" Suspicious Useragent detected, this could indicate crawler activity to automated scipts. Useragent: ", UserAgent ), "")      
+                       )
+| extend ExtraInfo = strcat(
+                                iif(isKnownCrawler and (Operation == "FilePreviewed" or Operation == "FileAccessed"), 
+                                strcat(Operation, " does not always mean the file was physically accessed, this event can trigger   when access page is accessed or file preview is loaded."), "")
+                                )
+| extend ShouldShowLog = case(
+    Trigger_on_managed_devices == false and IsManagedDevice == true, false, //
+    Trigger_on_managed_devices == true and IsManagedDevice == true, true,
+    Trigger_on_managed_devices == false and IsManagedDevice == false, true,
+    Trigger_on_managed_devices == true and IsManagedDevice == false, true,
+    true
+    )
+| where ShouldShowLog
+| extend AlertDetails = pack_all()
+| project TimeGenerated, AlertTitle, Severity, Description, ExtraInfo, Operation, IsManagedDevice, Site_Url, SourceFileName, ClientIP, country, UserAgent,AlertDetails, GeoIPInfo

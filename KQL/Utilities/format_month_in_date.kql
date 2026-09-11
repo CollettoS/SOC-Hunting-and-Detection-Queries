@@ -1,0 +1,19 @@
+| extend MonthNum = toint(format_datetime(TimeGenerated, 'MM'))
+| extend MonthName = case(
+    MonthNum == 1, "January",
+    MonthNum == 2, "February",
+    MonthNum == 3, "March",
+    MonthNum == 4, "April",
+    MonthNum == 5, "May",
+    MonthNum == 6, "June",
+    MonthNum == 7, "July",
+    MonthNum == 8, "August",
+    MonthNum == 9, "September",
+    MonthNum == 10, "October",
+    MonthNum == 11, "November",
+    MonthNum == 12, "December",
+    "Unknown"
+)
+| extend Day = toint(format_datetime(TimeGenerated, 'd'))
+| extend Year = format_datetime(TimeGenerated, 'yyyy')
+| extend FormattedDate = strcat(Day, " ", MonthName, " ", Year)

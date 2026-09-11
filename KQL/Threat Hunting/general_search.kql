@@ -1,0 +1,3 @@
+search "your_search_term"
+| summarize Count = count() by $table
+| sort by Count desc

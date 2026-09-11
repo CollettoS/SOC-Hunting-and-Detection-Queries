@@ -1,0 +1,3 @@
+SigninLogs
+| search ""
+| where AuthenticationDetails contains '"authenticationStepResultDetail":"Correct password"'

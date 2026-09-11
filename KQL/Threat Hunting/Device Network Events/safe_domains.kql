@@ -1,0 +1,21 @@
+let SafeDomains = dynamic([
+    "microsoft.com",
+    "microsoftonline.com",
+    "office.com",
+    "office.net",
+    "office365.com",
+    "windows.net",
+    "live.com",
+    "msftconnecttest.com",
+    "azure.com",
+    "azureedge.net",
+    "sharepoint.com",
+    "outlook.com",
+    "teams.microsoft.com",
+    "skype.com",
+    "bing.com",
+    "google-analytics.com"
+]);
+DeviceNetworkEvents
+| where isnotempty(RemoteUrl)
+| where not(RemoteUrl has_any (SafeDomains))

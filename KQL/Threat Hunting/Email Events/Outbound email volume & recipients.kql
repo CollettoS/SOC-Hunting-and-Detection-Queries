@@ -1,0 +1,7 @@
+// Outbound email volume & recipients
+let startTime = ago(7d);
+let user = "user@company.com";
+EmailEvents
+| where Timegenerated >= startTime and Direction == "Outbound" and SenderFromAddress =~ user
+| summarize msgs=count(), recipients=sum(RecipientCount) by bin(Timegenerated, 1h)
+| order by Timegenerated desc
