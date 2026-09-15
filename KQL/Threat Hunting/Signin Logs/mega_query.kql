@@ -1,26 +1,18 @@
 // === TOGGLE FLAGS ===
 let enable_user_filter = true;
-
 let enable_ip_filter = true;
-
 let enable_user_location_lookup = true;
-
 let enable_ip_seen_check = true;
-
 // === PARAMETERS ===
 let user_to_search = "user@~domain.com";
-
 let ip_to_search = "69.69.69.69";
-
 let time_range = 7d;
-
 // === BASE DATASET ===
 let base_data = SigninLogs
 | where TimeGenerated >= ago(time_range)
 | where (enable_user_filter == false or UserPrincipalName =~ user_to_search)
 | where (enable_ip_filter == false or IPAddress == ip_to_search)
 | project TimeGenerated, UserDisplayName, AppDisplayName, ResultType, ResultDescription, AuthenticationMethodsUsed, IPAddress, Location, UserPrincipalName;
-
 // === USER LOCATION LOOKUP ===
 let user_locations =
 SigninLogs
@@ -28,7 +20,6 @@ SigninLogs
 | where TimeGenerated >= ago(time_range)
 | where UserPrincipalName =~ user_to_search
 | summarize LocationsUsed = make_set(Location, 100) by UserPrincipalName;
-
 // === IP SEEN CHECK ===
 let ip_history =
 SigninLogs
@@ -36,7 +27,6 @@ SigninLogs
 | where TimeGenerated >= ago(30d)
 | where IPAddress == ip_to_search
 | summarize FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), SeenCount = count();
-
 // === FINAL JOIN ===
 base_data
 | join kind = leftouter (user_locations) on UserPrincipalName
@@ -45,5 +35,3 @@ base_data
     IP_LastSeen = iff(enable_ip_seen_check, toscalar(ip_history | project LastSeen), datetime(null)),
     IP_SeenCount = iff(enable_ip_seen_check, toscalar(ip_history | project SeenCount), int(null))
 | project TimeGenerated, UserDisplayName, AppDisplayName, ResultType, ResultDescription, AuthenticationMethodsUsed, IPAddress, Location, LocationsUsed, IP_FirstSeen, IP_LastSeen, IP_SeenCount
-
-// Query by S Collett
